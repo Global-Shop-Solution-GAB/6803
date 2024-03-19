@@ -1,0 +1,262 @@
+﻿Program.Sub.Preflight.Start
+v.Global.sError.Declare(String)
+
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'Author: Arturo Almaguer
+'Date: 6/14/2022
+'Customer: CDI Energy Products, quote number 13421
+'This program validates whether a new option is checked when creating a new SO and stores the information in a custom table.
+'This script is launched off 11869 SO Header pre-save hook
+
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+
+F.Intrinsic.Control.Try
+
+	V.Local.sSQL.Declare(String)
+	V.Local.sOrderNo.Declare(String)
+	V.Local.sQuoteNo.Declare(String)
+	V.Local.sDateTime.Declare(String)
+	
+	F.Intrinsic.Control.SelectCase(V.Caller.Hook)
+		
+		F.Intrinsic.Control.Case(11560)
+		'SO Header populate hook
+			
+			'Calling sub if SO is a new one
+			F.Intrinsic.Control.If(V.Caller.Switches, =, "N")
+				F.Intrinsic.Control.CallSub("UnhideControls")
+			F.Intrinsic.Control.EndIf
+	
+		F.Intrinsic.Control.Case(11565)
+		'SO Header order selected hook
+		
+			'Continue with process if SO is an existing one
+			F.Intrinsic.Control.If(V.Caller.Switches, =, "O")
+			
+				F.Intrinsic.Control.CallSub("UnhideControls")
+				
+				'Validating whether if option was marked for this order
+				F.Intrinsic.String.LPad(V.Passed.000003,"0",7,V.Local.sOrderNo)
+				
+				F.ODBC.Connection!Con.OpenCompanyConnection
+				F.Intrinsic.String.Build("select FLAG_COMPLETE from GCG_6803 where SO_NUMBER = '{0}';", V.Local.sOrderNo, V.Local.sSQL)
+				F.ODBC.Connection!Con.ExecuteAndReturn(V.Local.sSQL, V.Local.sSQL)
+				F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, False)
+					'Turning option on and locking it since it has already been marked
+					V.Passed.GAB-CHK-1.Set("Y")
+					F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1, "LOCK", 1)
+					V.Passed.GLOBAL.Set("Y")
+				F.Intrinsic.Control.Else
+					V.Passed.GLOBAL.Set("N")
+				F.Intrinsic.Control.EndIf
+				F.ODBC.Connection!Con.Close
+	
+			F.Intrinsic.Control.EndIf	
+		
+		F.Intrinsic.Control.Case(11810)
+		'SO Header Lines button hook
+		
+			F.Intrinsic.Control.If(V.Caller.Switches, =, "N")
+				
+				F.Intrinsic.Control.If(V.Passed.GAB-CHK-1, <>, "Y")
+					V.Passed.777777.Set(1)
+					F.Intrinsic.UI.Msgbox("CSCR option is not checked, Lines screen won't be displayed.", "Error")
+				F.Intrinsic.Control.EndIf
+			
+			F.Intrinsic.Control.EndIf
+		
+		F.Intrinsic.Control.Case(11869)
+		'SO Header pre save hook
+			
+			F.Intrinsic.Control.If(V.Caller.Switches, =, "N")
+				
+				'Validating if option is on for a new SO
+				F.Intrinsic.Control.If(V.Passed.GAB-CHK-1, =, "Y")
+				
+					F.Intrinsic.String.LPad(V.Passed.000003,"0",7,V.Local.sOrderNo)
+					F.Intrinsic.String.Format(V.Ambient.Now, "YYYY-MM-DD HH:NN:SS", V.Local.sDateTime)
+				
+					'Inserting record in custom table
+					F.ODBC.Connection!Con.OpenCompanyConnection
+					F.Intrinsic.String.Build("insert into GCG_6803(SO_NUMBER, FLAG_COMPLETE, USER_ID, DATETIME_STAMP) values('{0}','1','{1}','{2}');", V.Local.sOrderNo, V.Caller.User, V.Local.sDateTime, V.Local.sSQL)
+					F.ODBC.Connection!Con.Execute(V.Local.sSQL)
+					F.ODBC.Connection!Con.Close
+	
+				f.Intrinsic.Control.Else
+					
+					'Cancelling save process since option is not checked. display error message?
+					V.Passed.777777.Set(1)
+					F.Intrinsic.UI.Msgbox("CSCR option is not checked, cancelling order save process.", "Error")
+					
+				F.Intrinsic.Control.EndIf
+				
+			F.Intrinsic.Control.ElseIf(V.Caller.Switches, =, "O")
+				
+				'Validating if option wasn't marked before to allow the user to turn it on and save it as on the new SO process
+				F.Intrinsic.Control.If(V.Passed.GAB-CHK-1, =, "Y", "AND", V.Passed.GLOBAL, =, "N")
+					
+					F.Intrinsic.String.LPad(V.Passed.000003,"0",7,V.Local.sOrderNo)
+					F.Intrinsic.String.Format(V.Ambient.Now, "YYYY-MM-DD HH:NN:SS", V.Local.sDateTime)
+					
+					'Inserting record in custom table
+					F.ODBC.Connection!Con.OpenCompanyConnection
+					F.Intrinsic.String.Build("insert into GCG_6803(SO_NUMBER, FLAG_COMPLETE, USER_ID, DATETIME_STAMP) values('{0}','1','{1}','{2}');", V.Local.sOrderNo, V.Caller.User, V.Local.sDateTime, V.Local.sSQL)
+					F.ODBC.Connection!Con.Execute(V.Local.sSQL)
+					F.ODBC.Connection!Con.Close
+				
+				F.Intrinsic.Control.EndIf
+			
+			F.Intrinsic.Control.EndIf
+	
+		F.Intrinsic.Control.Case(11872)
+		'SO Header post save hook
+			
+			'Calling sub if SO is an existing one and the option wasn't marked
+			F.Intrinsic.Control.If(V.Caller.Switches, =, "O", "AND", V.Passed.GLOBAL, =, "N")
+			
+				F.Intrinsic.Control.CallSub("UpdateOrder")
+			
+			F.Intrinsic.Control.EndIf
+		
+		F.Intrinsic.Control.Case(11902)
+		'SO Header post exit hook
+			
+			'Calling sub if SO is a new one
+			F.Intrinsic.Control.If(V.Caller.Switches, =, "N")
+				
+				F.Intrinsic.Control.CallSub("UpdateOrder")
+				
+			F.Intrinsic.Control.EndIf
+		
+		F.Intrinsic.Control.Case(10923)
+		'Quote Header post save hook
+			
+			F.Intrinsic.Control.If(V.Caller.Switches, =, "N", "OR", V.Caller.Switches, =, "O")
+			
+				F.Intrinsic.String.LPad(V.Passed.000003,"0",7,V.Local.sQuoteNo)
+				
+				'Updating User 5 field to store the user ID of the person who created/modified a quote.
+				F.ODBC.Connection!Con.OpenCompanyConnection
+				F.Intrinsic.String.Build("update QUOTE_HEADER set USER_5 = '{0}' where QUOTE_NO = '{1}' and RECORD_NO = '  A';", V.Caller.User, V.Local.sQuoteNo, V.Local.sSQL)
+				F.ODBC.Connection!Con.Execute(V.Local.sSQL)
+				F.ODBC.Connection!Con.Close
+			
+			F.Intrinsic.Control.EndIf
+				
+	F.Intrinsic.Control.EndSelect
+
+F.Intrinsic.Control.Catch
+	
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+
+Program.Sub.Main.End
+
+Program.Sub.CheckTable.Start
+'This subroutine validates whether the custom table exist, creates it if it doesn't.
+
+F.Intrinsic.Control.Try
+
+	V.Local.bExists.Declare(Boolean)
+	
+	F.ODBC.Connection!Con.OpenCompanyConnection
+	F.ODBC.Connection!Con.TableExists("GCG_6803", V.Local.bExists)
+		F.Intrinsic.Control.If(V.Local.bExists, =, False)
+			F.ODBC.Connection!Con.Execute("CREATE TABLE GCG_6803 (SO_NUMBER CHAR(7), FLAG_COMPLETE BIT, USER_ID CHAR(20), DATETIME_STAMP DATETIME);")
+		F.Intrinsic.Control.EndIf
+	F.ODBC.Connection!Con.Close
+
+F.Intrinsic.Control.Catch
+	
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+
+Program.Sub.CheckTable.End
+
+Program.Sub.CatchError.Start
+'To display the error
+F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}", V.Ambient.ScriptPath, V.Ambient.Newline, V.Ambient.SubroutineCalledFrom, V.Ambient.ErrorNumber, V.Ambient.ErrorDescription, V.Ambient.GABVersion, V.Global.sError) 
+F.Intrinsic.UI.Msgbox(V.Global.sError)
+F.Intrinsic.Control.CallSub("Unload")
+Program.Sub.CatchError.End
+
+Program.Sub.Unload.Start
+'Closes the connection if it is open
+f.Intrinsic.Control.If(v.ODBC.con.exists,=,"1") 	
+    f.ODBC.Connection!Con.Close
+f.Intrinsic.Control.EndIf
+
+'Ending program
+F.Intrinsic.Control.End
+Program.Sub.Unload.End
+
+Program.Sub.UnhideControls.Start
+'This subroutine unhide and format labels and a checkbox in the SO Header screen
+
+F.Intrinsic.Control.Try
+	
+	'Unhiding controls
+	F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1, "HIDE", 0) 'True is 1, False 0
+	F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-CHK-1, "LOCK", 0)
+	F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1, "HIDE", 0)
+	F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-2, "HIDE", 0)
+	
+	'Setting up checkbox's message
+	V.Passed.GAB-LBL-1.Set("Please confirm Contract Review completed") 
+	V.Passed.GAB-LBL-2.Set("per work instruction CSCR-005") 
+	
+	'Setting up the position for each control
+	'PT is vertical position, PL is horizontal position
+	F.Intrinsic.Variable.SetProperty("GAB-LBL-1", "PT", 550)
+	F.Intrinsic.Variable.SetProperty("GAB-LBL-1", "PL", 600)
+	F.Intrinsic.Variable.SetProperty("GAB-LBL-1", "PW", 220)
+	
+	F.Intrinsic.Variable.SetProperty("GAB-LBL-2", "PT", 565)
+	F.Intrinsic.Variable.SetProperty("GAB-LBL-2", "PL", 600)
+	
+	F.Intrinsic.Variable.SetProperty("GAB-CHK-1", "PT", 550) 
+	F.Intrinsic.Variable.SetProperty("GAB-CHK-1", "PL", 575)
+
+F.Intrinsic.Control.Catch
+	
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.UnhideControls.End
+
+Program.Sub.UpdateOrder.Start
+'This subroutine updates SO Header User 3 and User 4 fields
+
+F.Intrinsic.Control.Try
+
+	V.Local.sSQL.Declare(String)
+	V.Local.sOrderNo.Declare(String)
+		
+	F.Intrinsic.String.LPad(V.Passed.000003,"0",7,V.Local.sOrderNo)
+	
+	F.ODBC.Connection!Con.OpenCompanyConnection
+	F.Intrinsic.String.Build("select FLAG_COMPLETE from GCG_6803 where SO_NUMBER = '{0}';", V.Local.sOrderNo, V.Local.sSQL)
+	F.ODBC.Connection!Con.ExecuteAndReturn(V.Local.sSQL,V.Local.sSQL)
+	
+	F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, False)
+		F.Intrinsic.String.Build("update ORDER_HEADER set USER_3 = '{0}', USER_4 = 'Y' where ORDER_NO = '{1}' and RECORD_NO = '  A';", V.Caller.User, V.Local.sOrderNo, V.Local.sSQL)
+		F.ODBC.Connection!Con.Execute(V.Local.sSQL)
+	F.Intrinsic.Control.EndIf
+	
+	F.ODBC.Connection!Con.Close
+
+F.Intrinsic.Control.Catch
+	
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.UpdateOrder.End
+
+Program.Sub.Comments.Start
+${$5$}$3.0.0.0$}$1
+${$6$}$apadilla$}$20220615162924954$}$Lag9STqBJOmNXSbd5+msRcBWPGz0aFqSzPePUG9qWbxtpsb6VshC/NMZSKrk5mMWEoP8FoWH3dO93C4Sy0rOpw==
+Program.Sub.Comments.End
